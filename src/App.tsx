@@ -246,8 +246,8 @@ function TransactionsWorkspace({
   return (
     <main className="finance-app">
       <header className="finance-topbar">
-        <a className="brand finance-brand" href="/FinancesSheet/" aria-label="SheetFinances">
-          <img src="/FinancesSheet/favicon.svg" alt="" width="38" height="38" />
+        <a className="brand finance-brand" href="/FinancesPWA/" aria-label="SheetFinances">
+          <img src="/FinancesPWA/favicon.svg" alt="" width="38" height="38" />
           <span>SheetFinances</span>
         </a>
         <div className="finance-topbar-actions">
@@ -584,8 +584,8 @@ function App() {
 
   return (
     <main className="page-shell">
-      <a className="brand" href="/FinancesSheet/" aria-label="SheetFinances">
-        <img src="/FinancesSheet/favicon.svg" alt="" width="40" height="40" />
+      <a className="brand" href="/FinancesPWA/" aria-label="SheetFinances">
+        <img src="/FinancesPWA/favicon.svg" alt="" width="40" height="40" />
         <span>SheetFinances</span>
       </a>
 
