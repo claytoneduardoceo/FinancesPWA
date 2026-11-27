@@ -36,6 +36,58 @@ export interface Workspace {
   name: string;
 }
 
+export interface DashboardAccountBalance {
+  id: string;
+  name: string;
+  currentBalance: number;
+  projectedBalance: number;
+}
+
+export interface DashboardBalance {
+  currency: string;
+  currentBalance: number | null;
+  projectedBalance: number | null;
+  projectedIncome: number;
+  projectedExpenses: number;
+  balanceComplete: boolean;
+  missingAccountCount: number;
+  balanceSource: "ACCOUNT_ANCHORS" | "WORKSPACE_ANCHOR" | "UNAVAILABLE";
+  accounts: DashboardAccountBalance[];
+}
+
+export interface DashboardTimelinePoint {
+  date: string;
+  currency: string;
+  income: number;
+  expenses: number;
+  balance: number | null;
+}
+
+export interface DashboardCommitment {
+  id: string;
+  date: string;
+  description: string;
+  amount: number | null;
+  currency: string;
+  direction: "INCOME" | "EXPENSE" | "UNKNOWN";
+  accountId: string;
+  accountName: string;
+  source: "TRANSACTION" | "RECURRENCE" | "DEBT" | "INVOICE";
+  estimated: boolean;
+  affectsBalance: boolean;
+  status: string;
+}
+
+export interface DashboardData {
+  asOfDate: string;
+  throughDate: string;
+  horizonDays: number;
+  balances: DashboardBalance[];
+  timeline: DashboardTimelinePoint[];
+  commitments: DashboardCommitment[];
+  warnings: string[];
+}
+
 export interface FinanceRecord {
   ID: string;
   [field: string]: unknown;
@@ -179,6 +231,22 @@ export function getMe(token: string): Promise<MeData> {
 export function getWorkspaces(token: string): Promise<Workspace[]> {
   return request<Workspace[]>(
     makeEndpoint({ resource: "workspaces", access_token: token }),
+    { method: "GET", cache: "no-store" }
+  );
+}
+
+export function getDashboard(
+  token: string,
+  workspaceId: string,
+  horizonDays = 30
+): Promise<DashboardData> {
+  return request<DashboardData>(
+    makeEndpoint({
+      resource: "dashboard",
+      access_token: token,
+      workspaceId,
+      horizonDays: String(horizonDays)
+    }),
     { method: "GET", cache: "no-store" }
   );
 }

@@ -1,4 +1,9 @@
-import { useEffect, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useState,
+  useSyncExternalStore,
+  type FormEvent
+} from "react";
 import {
   useInfiniteQuery,
   useMutation,
@@ -17,9 +22,65 @@ import {
   logout,
   type Workspace
 } from "./api/client";
+import Dashboard from "./Dashboard";
+import RecordList, { type RecordListColumn } from "./RecordList";
+import {
+  getQueryCacheError,
+  indexedDbPersister,
+  subscribeToQueryCacheError
+} from "./api/queryPersister";
 
 const SESSION_TOKEN_KEY = "finance-api-session";
+const SESSION_USER_ID_KEY = "finance-api-user-id";
 const TRANSACTION_PAGE_SIZE = 50;
+const WORKSPACE_NAVIGATION: Array<{
+  id: WorkspaceView;
+  label: string;
+  icon: string;
+}> = [
+  { id: "dashboard", label: "Dashboard", icon: "▦" },
+  { id: "items", label: "Itens", icon: "↗" },
+  { id: "income", label: "Rendas", icon: "↙" },
+  { id: "expenses", label: "Despesas", icon: "↗" },
+  { id: "debts", label: "Dívidas", icon: "◷" },
+  { id: "subscriptions", label: "Assinaturas", icon: "◌" },
+  { id: "installments", label: "Parcelamentos", icon: "▤" }
+];
+
+function readStoredSessionToken(): string | null {
+  const persistentToken = window.localStorage.getItem(SESSION_TOKEN_KEY);
+  const sessionToken = window.sessionStorage.getItem(SESSION_TOKEN_KEY);
+  if (persistentToken) {
+    window.sessionStorage.removeItem(SESSION_TOKEN_KEY);
+    return persistentToken;
+  }
+  if (sessionToken) {
+    window.localStorage.setItem(SESSION_TOKEN_KEY, sessionToken);
+    window.sessionStorage.removeItem(SESSION_TOKEN_KEY);
+    return sessionToken;
+  }
+  return null;
+}
+
+function storeSessionToken(token: string): void {
+  window.localStorage.setItem(SESSION_TOKEN_KEY, token);
+  window.sessionStorage.removeItem(SESSION_TOKEN_KEY);
+}
+
+function readStoredUserId(): string | null {
+  return window.localStorage.getItem(SESSION_USER_ID_KEY);
+}
+
+function storeSessionIdentity(token: string, userId: string): void {
+  storeSessionToken(token);
+  window.localStorage.setItem(SESSION_USER_ID_KEY, userId);
+}
+
+function clearStoredSessionToken(): void {
+  window.localStorage.removeItem(SESSION_TOKEN_KEY);
+  window.localStorage.removeItem(SESSION_USER_ID_KEY);
+  window.sessionStorage.removeItem(SESSION_TOKEN_KEY);
+}
 
 interface Transaction extends FinanceRecord {
   ACCOUNT_ID?: string;
@@ -36,6 +97,19 @@ interface Transaction extends FinanceRecord {
 interface TransactionPage extends EntityPage<Transaction> {
   nextOffset: number | null;
 }
+
+type WorkspaceView =
+  | "dashboard"
+  | "items"
+  | "income"
+  | "expenses"
+  | "debts"
+  | "subscriptions"
+  | "installments";
+
+type EntityPageWithOffset<T extends FinanceRecord> = EntityPage<T> & {
+  nextOffset: number | null;
+};
 
 function readText(value: unknown): string {
   return typeof value === "string" || typeof value === "number"
@@ -92,19 +166,38 @@ function formatTransactionAmount(
   }
 }
 
+function formatRecordAmount(amountValue: unknown, currency: string): string {
+  if (amountValue === null || amountValue === undefined || readText(amountValue) === "") {
+    return "—";
+  }
+  if (!currency) return "Moeda não informada";
+  return formatTransactionAmount(amountValue, currency);
+}
+
 function formatEnumLabel(value: unknown): string {
   const label = readText(value).toLocaleLowerCase("pt-BR").replace(/_/g, " ");
   return label ? label.charAt(0).toLocaleUpperCase("pt-BR") + label.slice(1) : "";
 }
 
-async function fetchTransactionPage(
+function isAccessDenial(error: unknown): boolean {
+  return error instanceof FinanceApiError &&
+    [
+      "UNAUTHORIZED",
+      "FORBIDDEN",
+      "WORKSPACE_FORBIDDEN",
+      "USER_NOT_FOUND"
+    ].includes(error.code);
+}
+
+async function fetchEntityPage<T extends FinanceRecord>(
+  resource: string,
   token: string,
   workspaceId: string,
   offset: number | null
-): Promise<TransactionPage> {
+): Promise<EntityPageWithOffset<T>> {
   if (offset === null) {
-    const probe = await getEntityPage<Transaction>(
-      "transactions", token, workspaceId, 1, 0
+    const probe = await getEntityPage<T>(
+      resource, token, workspaceId, 1, 0
     );
     if (probe.total === 0) {
       return { items: [], total: 0, nextOffset: null };
@@ -112,8 +205,8 @@ async function fetchTransactionPage(
     offset = Math.max(0, probe.total - TRANSACTION_PAGE_SIZE);
   }
 
-  const page = await getEntityPage<Transaction>(
-    "transactions",
+  const page = await getEntityPage<T>(
+    resource,
     token,
     workspaceId,
     TRANSACTION_PAGE_SIZE,
@@ -127,29 +220,61 @@ async function fetchTransactionPage(
   };
 }
 
+function fetchTransactionPage(
+  token: string,
+  workspaceId: string,
+  offset: number | null
+): Promise<TransactionPage> {
+  return fetchEntityPage<Transaction>(
+    "transactions", token, workspaceId, offset
+  );
+}
 interface TransactionsWorkspaceProps {
   token: string;
+  userId: string;
   email: string;
   workspaces: Workspace[];
+  isOnline: boolean;
+  usingCachedSession: boolean;
+  cacheError: string | null;
   onLogout: () => void;
   isLoggingOut: boolean;
 }
 
 function TransactionsWorkspace({
   token,
+  userId,
   email,
   workspaces,
+  isOnline,
+  usingCachedSession,
+  cacheError,
   onLogout,
   isLoggingOut
 }: TransactionsWorkspaceProps) {
+  const [activeView, setActiveView] = useState<WorkspaceView>("dashboard");
   const [workspaceId, setWorkspaceId] = useState(workspaces[0]?.id ?? "");
   const [search, setSearch] = useState("");
   const [directionFilter, setDirectionFilter] = useState("ALL");
   const selectedWorkspace = workspaces.find(
     (workspace) => workspace.id === workspaceId
   ) ?? workspaces[0];
+  const isTransactionView = ["items", "income", "expenses"].includes(activeView);
+  const recordResource = activeView === "debts"
+    ? "debts"
+    : activeView === "subscriptions"
+      ? "recurrences"
+      : activeView === "installments"
+        ? "installment_plans"
+        : "";
+  const isRecordView = Boolean(recordResource);
+  const needsAccountLookup = isTransactionView || isRecordView;
+  const needsCategoryLookup = isTransactionView ||
+    activeView === "subscriptions" ||
+    activeView === "installments";
+  const needsCardLookup = isTransactionView || activeView === "installments";
   const transactionsQuery = useInfiniteQuery({
-    queryKey: ["api", "transactions", token, selectedWorkspace?.id],
+    queryKey: ["finance-data", "transactions", userId, selectedWorkspace?.id],
     queryFn: ({ pageParam }) => {
       if (!selectedWorkspace) {
         throw new Error("Nenhum workspace selecionado.");
@@ -158,43 +283,68 @@ function TransactionsWorkspace({
     },
     initialPageParam: null as number | null,
     getNextPageParam: (lastPage) => lastPage.nextOffset ?? undefined,
-    enabled: Boolean(selectedWorkspace),
+    enabled: isTransactionView && Boolean(selectedWorkspace),
     retry: false,
     staleTime: 30_000
   });
+  const recordsQuery = useInfiniteQuery({
+    queryKey: [
+      "finance-data",
+      "entity-list",
+      recordResource,
+      userId,
+      selectedWorkspace?.id
+    ],
+    queryFn: ({ pageParam }) => {
+      if (!selectedWorkspace || !recordResource) {
+        throw new Error("Nenhuma lista selecionada.");
+      }
+      return fetchEntityPage<FinanceRecord>(
+        recordResource,
+        token,
+        selectedWorkspace.id,
+        pageParam
+      );
+    },
+    initialPageParam: null as number | null,
+    getNextPageParam: (lastPage) => lastPage.nextOffset ?? undefined,
+    enabled: isRecordView && Boolean(selectedWorkspace),
+    retry: false,
+    staleTime: 60_000
+  });
   const accountsQuery = useQuery({
-    queryKey: ["api", "accounts", token, selectedWorkspace?.id],
+    queryKey: ["finance-data", "accounts", userId, selectedWorkspace?.id],
     queryFn: () => {
       if (!selectedWorkspace) throw new Error("Nenhum workspace selecionado.");
       return getEntityPage<FinanceRecord>(
         "accounts", token, selectedWorkspace.id, 200, 0
       );
     },
-    enabled: Boolean(selectedWorkspace),
+    enabled: needsAccountLookup && Boolean(selectedWorkspace),
     retry: false,
     staleTime: 60_000
   });
   const categoriesQuery = useQuery({
-    queryKey: ["api", "categories", token, selectedWorkspace?.id],
+    queryKey: ["finance-data", "categories", userId, selectedWorkspace?.id],
     queryFn: () => {
       if (!selectedWorkspace) throw new Error("Nenhum workspace selecionado.");
       return getEntityPage<FinanceRecord>(
         "categories", token, selectedWorkspace.id, 200, 0
       );
     },
-    enabled: Boolean(selectedWorkspace),
+    enabled: needsCategoryLookup && Boolean(selectedWorkspace),
     retry: false,
     staleTime: 60_000
   });
   const cardsQuery = useQuery({
-    queryKey: ["api", "cards", token, selectedWorkspace?.id],
+    queryKey: ["finance-data", "cards", userId, selectedWorkspace?.id],
     queryFn: () => {
       if (!selectedWorkspace) throw new Error("Nenhum workspace selecionado.");
       return getEntityPage<FinanceRecord>(
         "cards", token, selectedWorkspace.id, 200, 0
       );
     },
-    enabled: Boolean(selectedWorkspace),
+    enabled: needsCardLookup && Boolean(selectedWorkspace),
     retry: false,
     staleTime: 60_000
   });
@@ -222,6 +372,16 @@ function TransactionsWorkspace({
   const transactions = transactionsQuery.data?.pages.flatMap((page) =>
     page.items.slice().reverse()
   ) ?? [];
+  const loadedRecords = recordsQuery.data?.pages.flatMap((page) =>
+    page.items.slice().reverse()
+  ) ?? [];
+  const records = activeView === "subscriptions"
+    ? loadedRecords.filter((record) =>
+      /SUBSCRIPTION|ASSINATURA/.test(readText(record.RULE_TYPE).toUpperCase())
+    )
+    : loadedRecords;
+  const recordsTotal = recordsQuery.data?.pages[0]?.total ?? 0;
+  const transactionTotal = transactionsQuery.data?.pages[0]?.total ?? 0;
   const normalizedSearch = search.trim().toLocaleLowerCase("pt-BR");
   const filteredTransactions = transactions.filter((transaction) => {
     const description = readText(transaction.DESCRIPTION);
@@ -233,15 +393,212 @@ function TransactionsWorkspace({
         value.toLocaleLowerCase("pt-BR").includes(normalizedSearch)
       );
     const direction = readText(transaction.DIRECTION).toUpperCase();
-    const matchesDirection = directionFilter === "ALL" ||
-      direction === directionFilter;
+    const viewDirection = activeView === "income"
+      ? "INCOME"
+      : activeView === "expenses"
+        ? "EXPENSE"
+        : directionFilter;
+    const matchesDirection = viewDirection === "ALL" ||
+      direction === viewDirection;
     return matchesSearch && matchesDirection;
   });
-  const total = transactionsQuery.data?.pages[0]?.total ?? 0;
-  const lookupError = accountsQuery.error ??
-    categoriesQuery.error ??
-    cardsQuery.error;
+  const total = transactionTotal;
+  const lookupError = (needsAccountLookup ? accountsQuery.error : undefined) ??
+    (needsCategoryLookup ? categoriesQuery.error : undefined) ??
+    (needsCardLookup ? cardsQuery.error : undefined);
   const initials = email.slice(0, 1).toLocaleUpperCase("pt-BR") || "U";
+  const transactionViewHeading = activeView === "income"
+    ? {
+      eyebrow: "ENTRADAS",
+      title: "Rendas",
+      subtitle: "Consulte os lançamentos classificados como receita."
+    }
+    : activeView === "expenses"
+      ? {
+        eyebrow: "SAÍDAS",
+        title: "Despesas",
+        subtitle: "Consulte os lançamentos classificados como despesa."
+      }
+      : {
+        eyebrow: "MOVIMENTAÇÕES",
+        title: "Itens",
+        subtitle: "Consulte todos os lançamentos do seu workspace."
+      };
+  const accountCurrencyById = new Map(
+    (accountsQuery.data?.items ?? []).map((account) => [
+      readText(account.ID),
+      readText(account.CURRENCY).toUpperCase()
+    ])
+  );
+  const cardAccountById = new Map(
+    (cardsQuery.data?.items ?? []).map((card) => [
+      readText(card.ID),
+      readText(card.ACCOUNT_ID)
+    ])
+  );
+  function getRecordCurrency(record: FinanceRecord): string {
+    const accountId = readText(record.ACCOUNT_ID) ||
+      cardAccountById.get(readText(record.CARD_ID)) ||
+      "";
+    return accountCurrencyById.get(accountId) || "";
+  }
+  const recordColumns: RecordListColumn<FinanceRecord>[] =
+    activeView === "debts"
+      ? [
+        {
+          key: "description",
+          label: "Descrição",
+          render: (record) => readText(record.DESCRIPTION) || "Dívida"
+        },
+        {
+          key: "account",
+          label: "Conta",
+          render: (record) =>
+            accountsById.get(readText(record.ACCOUNT_ID)) || "—"
+        },
+        {
+          key: "installment",
+          label: "Parcela",
+          render: (record) => {
+            const currency = accountCurrencyById.get(
+              readText(record.ACCOUNT_ID)
+            ) || "";
+            const amount = formatRecordAmount(
+              record.INSTALLMENT_AMOUNT,
+              currency
+            );
+            const count = readText(record.INSTALLMENT_COUNT);
+            return count ? `${amount} · ${count}x` : amount;
+          }
+        },
+        {
+          key: "period",
+          label: "Período",
+          render: (record) => {
+            const start = readText(record.START_DATE);
+            const end = readText(record.END_DATE);
+            if (!start && !end) return "—";
+            return `${start ? formatTransactionDate(start) : "Início aberto"} – ${
+              end ? formatTransactionDate(end) : "Sem fim"
+            }`;
+          }
+        },
+        {
+          key: "due-day",
+          label: "Vencimento",
+          render: (record) => {
+            const dueDay = readText(record.DUE_DAY);
+            return dueDay ? `Dia ${dueDay}` : "—";
+          }
+        },
+        {
+          key: "status",
+          label: "Situação",
+          render: (record) => formatEnumLabel(record.STATUS) || "—"
+        }
+      ]
+      : activeView === "subscriptions"
+        ? [
+          {
+            key: "description",
+            label: "Assinatura",
+            render: (record) => readText(record.DESCRIPTION) || "Assinatura"
+          },
+          {
+            key: "amount",
+            label: "Valor",
+            render: (record) => formatRecordAmount(
+              record.AMOUNT,
+              readText(record.CURRENCY).toUpperCase()
+            )
+          },
+          {
+            key: "account",
+            label: "Conta",
+            render: (record) =>
+              accountsById.get(readText(record.ACCOUNT_ID)) || "—"
+          },
+          {
+            key: "category",
+            label: "Categoria",
+            render: (record) =>
+              categoriesById.get(readText(record.CATEGORY_ID)) || "—"
+          },
+          {
+            key: "cycle",
+            label: "Recorrência",
+            render: (record) => {
+              const dueDay = readText(record.DUE_DAY);
+              return dueDay ? `Mensal · dia ${dueDay}` : "Mensal";
+            }
+          },
+          {
+            key: "start-date",
+            label: "Início",
+            render: (record) => record.START_DATE
+              ? formatTransactionDate(record.START_DATE)
+              : "—"
+          },
+          {
+            key: "status",
+            label: "Situação",
+            render: (record) => formatEnumLabel(record.STATUS) || "—"
+          }
+        ]
+        : [
+          {
+            key: "description",
+            label: "Parcelamento",
+            render: (record) => readText(record.DESCRIPTION) || "Parcelamento"
+          },
+          {
+            key: "account",
+            label: "Conta / cartão",
+            render: (record) => {
+              const card = cardsById.get(readText(record.CARD_ID));
+              const account = accountsById.get(readText(record.ACCOUNT_ID));
+              return card || account || "—";
+            }
+          },
+          {
+            key: "category",
+            label: "Categoria",
+            render: (record) =>
+              categoriesById.get(readText(record.CATEGORY_ID)) || "—"
+          },
+          {
+            key: "total",
+            label: "Valor total",
+            render: (record) => formatRecordAmount(
+              record.TOTAL_AMOUNT,
+              getRecordCurrency(record)
+            )
+          },
+          {
+            key: "installment",
+            label: "Parcelas",
+            render: (record) => {
+              const count = readText(record.INSTALLMENT_COUNT);
+              const amount = formatRecordAmount(
+                record.INSTALLMENT_AMOUNT,
+                getRecordCurrency(record)
+              );
+              return count ? `${count}x · ${amount}` : amount;
+            }
+          },
+          {
+            key: "purchase-date",
+            label: "Compra",
+            render: (record) => record.PURCHASE_DATE
+              ? formatTransactionDate(record.PURCHASE_DATE)
+              : readText(record.FIRST_INVOICE_MONTH) || "—"
+          },
+          {
+            key: "status",
+            label: "Situação",
+            render: (record) => formatEnumLabel(record.STATUS) || "—"
+          }
+        ];
 
   return (
     <main className="finance-app">
@@ -285,14 +642,47 @@ function TransactionsWorkspace({
         </div>
       </header>
 
+      {!isOnline && (
+        <p className="cache-status-banner" role="status">
+          Você está offline. Os dados salvos neste dispositivo podem ser
+          consultados por até 24 horas; dados ainda não carregados precisam de
+          conexão.
+        </p>
+      )}
+      {usingCachedSession && isOnline && (
+        <p className="cache-status-banner" role="status">
+          Não foi possível validar a sessão agora. Exibindo informações salvas
+          localmente; elas podem estar desatualizadas.
+        </p>
+      )}
+      {cacheError && (
+        <p className="cache-status-banner cache-status-error" role="status">
+          {cacheError}. Verifique o espaço disponível no navegador e evite
+          limpar os dados do site enquanto estiver offline.
+        </p>
+      )}
+
       <div className="finance-body">
         <aside className="finance-sidebar">
           <p className="sidebar-caption">MENU PRINCIPAL</p>
           <nav aria-label="Navegação principal">
-            <a className="sidebar-link active" href="#transactions">
-              <span className="sidebar-icon" aria-hidden="true">↗</span>
-              Transações
-            </a>
+            {WORKSPACE_NAVIGATION.map((item) => (
+              <a
+                key={item.id}
+                className={`sidebar-link ${activeView === item.id ? "active" : ""}`}
+                href={`#${item.id}`}
+                aria-current={activeView === item.id ? "page" : undefined}
+                onClick={(event) => {
+                  event.preventDefault();
+                  setActiveView(item.id);
+                }}
+              >
+                <span className="sidebar-icon" aria-hidden="true">
+                  {item.icon}
+                </span>
+                {item.label}
+              </a>
+            ))}
           </nav>
           <div className="sidebar-bottom">
             <span className="sidebar-secure-mark" aria-hidden="true">✓</span>
@@ -300,14 +690,20 @@ function TransactionsWorkspace({
           </div>
         </aside>
 
+        {activeView === "dashboard" && selectedWorkspace ? (
+          <Dashboard
+            token={token}
+            userId={userId}
+            workspaceId={selectedWorkspace.id}
+            workspaceName={selectedWorkspace.name || "Meu workspace"}
+          />
+        ) : isTransactionView ? (
         <section className="transactions-content" id="transactions">
           <div className="transactions-heading">
             <div>
-              <p className="eyebrow">MOVIMENTAÇÕES</p>
-              <h1>Transações</h1>
-              <p className="transactions-subtitle">
-                Consulte os lançamentos do seu workspace.
-              </p>
+              <p className="eyebrow">{transactionViewHeading.eyebrow}</p>
+              <h1>{transactionViewHeading.title}</h1>
+              <p className="transactions-subtitle">{transactionViewHeading.subtitle}</p>
             </div>
             <button
               className="refresh-button"
@@ -331,32 +727,35 @@ function TransactionsWorkspace({
                 aria-label="Buscar transações carregadas"
               />
             </label>
-            <label className="direction-select">
-              <span className="visually-hidden">Filtrar por tipo</span>
-              <select
-                value={directionFilter}
-                onChange={(event) => setDirectionFilter(event.target.value)}
-              >
-                <option value="ALL">Todos os tipos</option>
-                <option value="INCOME">Receitas</option>
-                <option value="EXPENSE">Despesas</option>
-              </select>
-            </label>
+            {activeView === "items" && (
+              <label className="direction-select">
+                <span className="visually-hidden">Filtrar por tipo</span>
+                <select
+                  value={directionFilter}
+                  onChange={(event) => setDirectionFilter(event.target.value)}
+                >
+                  <option value="ALL">Todos os tipos</option>
+                  <option value="INCOME">Rendas</option>
+                  <option value="EXPENSE">Despesas</option>
+                </select>
+              </label>
+            )}
           </div>
 
           {lookupError instanceof Error && (
             <p className="lookup-warning" role="alert">
-              Alguns nomes de contas, categorias ou cartões não puderam ser
-              carregados: {lookupError.message}
+              Não foi possível atualizar os nomes de contas, categorias ou
+              cartões. Os nomes salvos podem estar desatualizados:{" "}
+              {lookupError.message}
             </p>
           )}
 
           <div className="transactions-list-card">
             <div className="list-card-heading">
               <div>
-                <h2>Todos os lançamentos</h2>
+                <h2>{transactionViewHeading.title}</h2>
                 <p>
-                  {transactionsQuery.isSuccess
+                  {transactionsQuery.data
                     ? `${transactions.length} de ${total} carregadas`
                     : "Carregando lançamentos"}
                 </p>
@@ -366,12 +765,19 @@ function TransactionsWorkspace({
               </span>
             </div>
 
+            {transactionsQuery.isError && transactionsQuery.data && (
+              <p className="cache-data-warning" role="status">
+                Não foi possível atualizar os lançamentos. Exibindo os últimos
+                dados salvos neste dispositivo.
+              </p>
+            )}
+
             {transactionsQuery.isPending ? (
               <div className="transactions-state">
                 <span className="loading-spinner" aria-hidden="true" />
                 <p>Carregando suas transações...</p>
               </div>
-            ) : transactionsQuery.isError ? (
+            ) : transactionsQuery.isError && !transactionsQuery.data ? (
               <div className="transactions-state error-state" role="alert">
                 <span className="state-icon error" aria-hidden="true">!</span>
                 <h3>Não foi possível carregar as transações</h3>
@@ -391,7 +797,7 @@ function TransactionsWorkspace({
             ) : total === 0 ? (
               <div className="transactions-state empty-state">
                 <span className="empty-icon" aria-hidden="true">↗</span>
-                <h3>Nenhuma transação por aqui ainda</h3>
+                <h3>Nenhum lançamento por aqui ainda</h3>
                 <p>Quando houver lançamentos neste workspace, eles aparecerão nesta lista.</p>
               </div>
             ) : filteredTransactions.length === 0 ? (
@@ -476,9 +882,53 @@ function TransactionsWorkspace({
             )}
           </div>
           <p className="list-footnote">
-            A busca e os filtros consideram as transações já carregadas.
+            A busca e os filtros consideram os lançamentos já carregados.
           </p>
         </section>
+        ) : isRecordView ? (
+          <RecordList
+            eyebrow={activeView === "debts"
+              ? "COMPROMISSOS"
+              : activeView === "subscriptions"
+                ? "RECORRÊNCIAS"
+                : "COMPRAS PARCELADAS"}
+            title={activeView === "debts"
+              ? "Dívidas"
+              : activeView === "subscriptions"
+                ? "Assinaturas"
+                : "Parcelamentos"}
+            subtitle={activeView === "debts"
+              ? "Acompanhe parcelas, prazos e situação das dívidas cadastradas."
+              : activeView === "subscriptions"
+                ? "Regras recorrentes identificadas como assinaturas."
+                : "Consulte compras parceladas, valores e situação."}
+            items={records}
+            columns={recordColumns}
+            total={recordsTotal}
+            loadedCount={loadedRecords.length}
+            isPending={recordsQuery.isPending}
+            isFetching={recordsQuery.isFetching}
+            error={recordsQuery.error}
+            lookupError={lookupError}
+            hasNextPage={recordsQuery.hasNextPage}
+            isFetchingNextPage={recordsQuery.isFetchingNextPage}
+            searchText={(record) =>
+              Object.values(record).map(readText).join(" ")
+            }
+            emptyTitle={activeView === "debts"
+              ? "Nenhuma dívida cadastrada"
+              : activeView === "subscriptions"
+                ? "Nenhuma assinatura encontrada"
+                : "Nenhum parcelamento cadastrado"}
+            emptyMessage={activeView === "debts"
+              ? "As dívidas cadastradas neste workspace aparecerão aqui."
+              : activeView === "subscriptions"
+                ? "As regras em RECURRENCES com tipo SUBSCRIPTION ou ASSINATURA aparecerão aqui."
+                : "Os parcelamentos cadastrados neste workspace aparecerão aqui."}
+            onRefresh={() => void recordsQuery.refetch()}
+            onLoadMore={() => void recordsQuery.fetchNextPage()}
+          />
+        ) : null}
       </div>
     </main>
   );
@@ -486,31 +936,42 @@ function TransactionsWorkspace({
 
 function App() {
   const [token, setToken] = useState<string | null>(() =>
-    window.sessionStorage.getItem(SESSION_TOKEN_KEY)
+    readStoredSessionToken()
   );
+  const [userId, setUserId] = useState<string | null>(() =>
+    readStoredUserId()
+  );
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authMessage, setAuthMessage] = useState("");
   const queryClient = useQueryClient();
+  const cacheError = useSyncExternalStore(
+    subscribeToQueryCacheError,
+    getQueryCacheError,
+    () => null
+  );
 
-  function clearApiCache() {
-    queryClient.removeQueries({ queryKey: ["api"] });
+  async function clearApiCache() {
+    queryClient.clear();
+    await indexedDbPersister.removeClient();
   }
 
   const meQuery = useQuery({
-    queryKey: ["api", "me", token],
+    queryKey: ["finance-session", "me", userId || "unresolved"],
     queryFn: () => getMe(token!),
     enabled: Boolean(token && financeApiUrl),
     retry: false,
     staleTime: 30_000
   });
+  const verifiedUserId = meQuery.data?.user.ID ?? userId ?? "";
   const activeMemberships = meQuery.data?.memberships.filter(
     (membership) => membership.status === "ACTIVE" && !membership.deletedAt
   ) ?? [];
   const workspacesQuery = useQuery({
-    queryKey: ["api", "workspaces", token],
+    queryKey: ["finance-data", "workspaces", verifiedUserId],
     queryFn: () => getWorkspaces(token!),
-    enabled: Boolean(token && meQuery.isSuccess && activeMemberships.length),
+    enabled: Boolean(token && meQuery.data && activeMemberships.length),
     retry: false,
     staleTime: 60_000
   });
@@ -518,8 +979,9 @@ function App() {
   const loginMutation = useMutation({
     mutationFn: () => login(email.trim(), password),
     onSuccess: (session) => {
-      window.sessionStorage.setItem(SESSION_TOKEN_KEY, session.token);
+      storeSessionIdentity(session.token, session.userId);
       setToken(session.token);
+      setUserId(session.userId);
       setPassword("");
       setAuthMessage("");
     }
@@ -527,16 +989,18 @@ function App() {
 
   const logoutMutation = useMutation({
     mutationFn: () => logout(token!),
-    onSuccess: () => {
-      clearApiCache();
-      window.sessionStorage.removeItem(SESSION_TOKEN_KEY);
+    onSuccess: async () => {
+      await clearApiCache();
+      clearStoredSessionToken();
       setToken(null);
+      setUserId(null);
       setAuthMessage("");
     },
-    onError: (error) => {
-      clearApiCache();
-      window.sessionStorage.removeItem(SESSION_TOKEN_KEY);
+    onError: async (error) => {
+      await clearApiCache();
+      clearStoredSessionToken();
       setToken(null);
+      setUserId(null);
       setAuthMessage(
         `A sessão foi removida deste dispositivo, mas a API não confirmou a revogação. ${
           error instanceof Error ? error.message : ""
@@ -546,17 +1010,45 @@ function App() {
   });
 
   useEffect(() => {
+    const verifiedId = meQuery.data?.user.ID;
+    if (token && verifiedId && verifiedId !== userId) {
+      if (userId && userId !== verifiedId) {
+        void clearApiCache();
+      }
+      queryClient.setQueryData(
+        ["finance-session", "me", verifiedId],
+        meQuery.data
+      );
+      window.localStorage.setItem(SESSION_USER_ID_KEY, verifiedId);
+      setUserId(verifiedId);
+    }
+  }, [meQuery.data, queryClient, token, userId]);
+
+  useEffect(() => {
     if (
       token &&
-      meQuery.error instanceof FinanceApiError &&
-      meQuery.error.code === "UNAUTHORIZED"
+      (
+        isAccessDenial(meQuery.error) ||
+        isAccessDenial(workspacesQuery.error)
+      )
     ) {
-      clearApiCache();
-      window.sessionStorage.removeItem(SESSION_TOKEN_KEY);
+      void clearApiCache();
+      clearStoredSessionToken();
       setToken(null);
-      setAuthMessage("Sua sessão terminou. Entre novamente.");
+      setUserId(null);
+      setAuthMessage("Sua sessão ou permissão foi revogada. Entre novamente.");
     }
-  }, [meQuery.error, queryClient, token]);
+  }, [meQuery.error, queryClient, token, workspacesQuery.error]);
+
+  useEffect(() => {
+    const updateOnlineState = () => setIsOnline(navigator.onLine);
+    window.addEventListener("online", updateOnlineState);
+    window.addEventListener("offline", updateOnlineState);
+    return () => {
+      window.removeEventListener("online", updateOnlineState);
+      window.removeEventListener("offline", updateOnlineState);
+    };
+  }, []);
 
   function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -564,18 +1056,30 @@ function App() {
     loginMutation.mutate();
   }
 
+  const accessDenied = isAccessDenial(meQuery.error) ||
+    isAccessDenial(workspacesQuery.error);
+  const availableWorkspaces = workspacesQuery.data ?? [];
+  const usingCachedSession = Boolean(
+    meQuery.data &&
+    (meQuery.isError || workspacesQuery.isError) &&
+    !accessDenied
+  );
   if (
     token &&
-    meQuery.isSuccess &&
+    meQuery.data &&
+    !accessDenied &&
     activeMemberships.length > 0 &&
-    workspacesQuery.isSuccess &&
-    workspacesQuery.data.length > 0
+    availableWorkspaces.length > 0
   ) {
     return (
       <TransactionsWorkspace
         token={token}
+        userId={verifiedUserId}
         email={meQuery.data.user.EMAIL}
-        workspaces={workspacesQuery.data}
+        workspaces={availableWorkspaces}
+        isOnline={isOnline}
+        usingCachedSession={usingCachedSession}
+        cacheError={cacheError}
         onLogout={() => logoutMutation.mutate()}
         isLoggingOut={logoutMutation.isPending}
       />
@@ -701,6 +1205,11 @@ function App() {
                 {authMessage && (
                   <p className="form-message" role="status">{authMessage}</p>
                 )}
+                {cacheError && (
+                  <p className="form-message error" role="status">
+                    {cacheError}
+                  </p>
+                )}
 
                 <button
                   className="primary-button"
@@ -722,7 +1231,8 @@ function App() {
               </form>
 
               <p className="form-footnote">
-                Acesso privado. O cadastro é feito pelo administrador.
+                Sua sessão permanece neste dispositivo até você sair. Evite em
+                dispositivos compartilhados.
               </p>
             </>
           ) : meQuery.isPending ? (
