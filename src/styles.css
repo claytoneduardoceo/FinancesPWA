@@ -1,7 +1,26 @@
 :root {
   font-family: Inter, "Segoe UI", "Helvetica Neue", sans-serif;
-  color: #17233c;
-  background: #f4f6fb;
+  color-scheme: light;
+  --canvas: #f2f6f7;
+  --surface: #ffffff;
+  --surface-muted: #f5f8f9;
+  --surface-subtle: #f9fbfc;
+  --text-strong: #15303d;
+  --text: #465e69;
+  --text-muted: #687d87;
+  --line: #dce6e9;
+  --line-soft: #e9eff1;
+  --accent: #087fa5;
+  --accent-strong: #076b8c;
+  --accent-soft: #e6f4f8;
+  --positive: #16864f;
+  --positive-soft: #e8f5ed;
+  --negative: #c83e3a;
+  --negative-soft: #fff0ef;
+  --warning: #9c641a;
+  --warning-soft: #fff6e8;
+  color: var(--text-strong);
+  background: var(--canvas);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -1463,5 +1482,405 @@ a:focus-visible {
   .list-count-badge {
     padding: 5px 7px;
     font-size: 8px;
+  }
+}
+
+body {
+  background:
+    radial-gradient(ellipse at 12% 9%, rgba(8, 127, 165, 0.07), transparent 34rem),
+    radial-gradient(ellipse at 92% 91%, rgba(21, 48, 61, 0.045), transparent 30rem),
+    var(--canvas);
+  color: var(--text-strong);
+}
+
+.page-shell,
+.finance-app {
+  color: var(--text-strong);
+}
+
+.brand {
+  color: var(--text-strong);
+}
+
+.auth-layout {
+  border-color: var(--line);
+  background: var(--surface);
+  box-shadow:
+    0 24px 70px rgba(18, 49, 64, 0.09),
+    0 2px 8px rgba(18, 49, 64, 0.035);
+}
+
+.visual-panel {
+  background:
+    radial-gradient(ellipse at 8% 100%, rgba(22, 126, 158, 0.42), transparent 48%),
+    linear-gradient(145deg, #0d2029 0%, #103541 55%, #155064 100%);
+}
+
+.visual-panel .eyebrow {
+  color: #75c4dd;
+}
+
+.visual-description {
+  color: #c2d5dc;
+}
+
+.eyebrow,
+.form-heading .eyebrow,
+.transactions-heading .eyebrow {
+  color: var(--text-muted);
+}
+
+.form-panel h2,
+.transactions-heading h1 {
+  color: var(--text-strong);
+}
+
+.secure-mark {
+  border-color: var(--line);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.form-subtitle,
+.form-footnote,
+.page-footer {
+  color: var(--text-muted);
+}
+
+.login-form label {
+  color: var(--text);
+}
+
+.login-form input,
+.workspace-picker select,
+.direction-select select,
+.transaction-search {
+  border-color: var(--line);
+  background: var(--surface-subtle);
+  color: var(--text-strong);
+}
+
+.login-form input::placeholder,
+.transaction-search input::placeholder {
+  color: var(--text-muted);
+}
+
+.login-form input:focus {
+  border-color: var(--accent);
+  background: var(--surface);
+  box-shadow: 0 0 0 3px rgba(8, 127, 165, 0.12);
+}
+
+.transaction-search input {
+  color: var(--text-strong);
+}
+
+.form-message,
+.account-email {
+  color: var(--text);
+}
+
+.form-message.error {
+  color: var(--negative);
+}
+
+.form-message code {
+  background: var(--surface-muted);
+}
+
+.primary-button {
+  border-color: var(--accent-strong);
+  background: linear-gradient(105deg, #076b8c, #0b89ad);
+  box-shadow: 0 7px 15px rgba(8, 91, 120, 0.16);
+}
+
+.primary-button:hover:not(:disabled) {
+  box-shadow: 0 10px 20px rgba(8, 91, 120, 0.22);
+}
+
+.loading-spinner {
+  border-color: var(--line);
+  border-top-color: var(--accent);
+}
+
+.state-icon {
+  background: var(--positive-soft);
+  color: var(--positive);
+}
+
+.state-icon.error {
+  background: var(--negative-soft);
+  color: var(--negative);
+}
+
+.text-button {
+  color: var(--accent-strong);
+}
+
+.finance-topbar {
+  border-bottom-color: var(--line);
+  background: var(--surface);
+}
+
+.workspace-name,
+.logout-link {
+  color: var(--text);
+}
+
+.workspace-picker {
+  color: var(--text-muted);
+}
+
+.workspace-picker select,
+.direction-select select {
+  color: var(--text);
+}
+
+.user-avatar {
+  border-color: var(--line);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.user-email {
+  color: var(--text-muted);
+}
+
+.finance-sidebar {
+  border-right-color: var(--line);
+  background: var(--surface-muted);
+}
+
+.sidebar-caption,
+.sidebar-bottom {
+  color: var(--text-muted);
+}
+
+.sidebar-link {
+  color: var(--text);
+}
+
+.sidebar-link.active {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.sidebar-secure-mark {
+  background: var(--positive-soft);
+  color: var(--positive);
+}
+
+.transactions-heading .eyebrow {
+  color: var(--accent);
+}
+
+.transactions-subtitle,
+.list-card-heading p,
+.list-footnote {
+  color: var(--text-muted);
+}
+
+.refresh-button,
+.secondary-button {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.refresh-button:hover:not(:disabled),
+.secondary-button:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.refresh-icon {
+  color: var(--accent);
+}
+
+.lookup-warning {
+  border-color: #eeddbf;
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.transactions-list-card {
+  border-color: var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 8px 27px rgba(18, 49, 64, 0.045);
+}
+
+.list-card-heading,
+.transaction-table th,
+.transaction-table td,
+.load-more-row {
+  border-color: var(--line-soft);
+}
+
+.list-card-heading h2 {
+  color: var(--text-strong);
+}
+
+.list-count-badge {
+  border-color: var(--line);
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.transaction-table th {
+  background: var(--surface-muted);
+  color: var(--text-muted);
+}
+
+.transaction-table td {
+  color: var(--text);
+}
+
+.transaction-table tbody tr:hover {
+  background: var(--surface-subtle);
+}
+
+.transaction-date {
+  color: var(--text-muted) !important;
+}
+
+.transaction-description {
+  color: var(--text-strong);
+}
+
+.transaction-category {
+  color: var(--text-muted);
+}
+
+.direction-badge {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.direction-badge.income {
+  background: var(--positive-soft);
+  color: var(--positive);
+}
+
+.direction-badge.expense {
+  background: var(--negative-soft);
+  color: var(--negative);
+}
+
+.transaction-amount {
+  color: var(--text-strong) !important;
+}
+
+.transaction-amount.income {
+  color: var(--positive) !important;
+}
+
+.transaction-amount.expense {
+  color: var(--negative) !important;
+}
+
+.transactions-state {
+  color: var(--text-muted);
+}
+
+.transactions-state h3 {
+  color: var(--text-strong);
+}
+
+.empty-icon {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --canvas: #08141a;
+    --surface: #0e1e26;
+    --surface-muted: #10232c;
+    --surface-subtle: #0b1920;
+    --text-strong: #e8f1f4;
+    --text: #bdcdd2;
+    --text-muted: #849ba5;
+    --line: #243a43;
+    --line-soft: #1c313a;
+    --accent: #29b4dc;
+    --accent-strong: #4fc4e5;
+    --accent-soft: #123543;
+    --positive: #45c77c;
+    --positive-soft: #123629;
+    --negative: #f0746b;
+    --negative-soft: #3a2024;
+    --warning: #e8bc73;
+    --warning-soft: #342b1e;
+  }
+
+  body {
+    background:
+      radial-gradient(ellipse at 12% 9%, rgba(18, 85, 106, 0.2), transparent 34rem),
+      radial-gradient(ellipse at 92% 91%, rgba(14, 53, 65, 0.18), transparent 30rem),
+      var(--canvas);
+  }
+
+  .auth-layout {
+    border-color: var(--line);
+    box-shadow:
+      0 24px 70px rgba(0, 0, 0, 0.24),
+      0 2px 8px rgba(0, 0, 0, 0.16);
+  }
+
+  .visual-panel {
+    background:
+      radial-gradient(ellipse at 8% 100%, rgba(21, 109, 136, 0.38), transparent 48%),
+      linear-gradient(145deg, #0b1a21 0%, #0d2b35 55%, #104050 100%);
+  }
+
+  .secure-mark {
+    border-color: var(--line);
+  }
+
+  .login-form input:focus {
+    box-shadow: 0 0 0 3px rgba(41, 180, 220, 0.17);
+  }
+
+  .primary-button {
+    border-color: #167f9e;
+    background: linear-gradient(105deg, #086a87, #087f9d);
+    box-shadow: 0 7px 18px rgba(0, 0, 0, 0.2);
+  }
+
+  .primary-button:hover:not(:disabled) {
+    box-shadow: 0 10px 22px rgba(0, 0, 0, 0.28);
+  }
+
+  .finance-topbar {
+    background: var(--surface);
+  }
+
+  .finance-sidebar {
+    background: #0a171d;
+  }
+
+  .finance-sidebar,
+  .finance-topbar {
+    border-color: var(--line);
+  }
+
+  .lookup-warning {
+    border-color: #5a492b;
+  }
+
+  .transactions-list-card {
+    box-shadow: 0 8px 27px rgba(0, 0, 0, 0.13);
+  }
+
+  .transaction-table tbody tr:hover {
+    background: #132932;
+  }
+
+  @media (max-width: 680px) {
+    .finance-sidebar {
+      background: var(--surface);
+    }
   }
 }
