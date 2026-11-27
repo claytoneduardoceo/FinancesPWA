@@ -98,6 +98,27 @@ export interface EntityPage<T> {
   total: number;
 }
 
+export type MobileEventView = "review" | "logs";
+
+export interface MobileEvent extends FinanceRecord {
+  KIND?: "EXTERNAL_EVENT" | "TRANSACTION" | "INSTALLMENT_PLAN";
+  EXTERNAL_ID?: string;
+  ENTRY_TYPE?: string;
+  RECEIVED_AT?: string;
+  TRANSACTION_DATE?: string;
+  DESCRIPTION?: string;
+  AMOUNT?: number | string;
+  CURRENCY?: string;
+  ACCOUNT_ID?: string;
+  ACCOUNT_NAME?: string;
+  CARD_LAST_FOUR?: string;
+  MERCHANT?: string;
+  CATEGORY_LABEL?: string;
+  NOTES?: string;
+  PROCESSING_STATUS?: string;
+  PAYLOAD_JSON?: string;
+}
+
 export const financeApiUrl = (
   import.meta.env.VITE_FINANCE_API_URL ?? ""
 ).trim();
@@ -263,6 +284,31 @@ export async function getEntityPage<T extends FinanceRecord>(
       resource,
       access_token: token,
       workspaceId,
+      limit: String(limit),
+      offset: String(offset)
+    }),
+    { method: "GET", cache: "no-store" }
+  );
+  const total = response.meta?.total;
+  return {
+    items: response.data,
+    total: typeof total === "number" ? total : response.data.length
+  };
+}
+
+export async function getMobileEventPage(
+  token: string,
+  workspaceId: string,
+  view: MobileEventView,
+  limit: number,
+  offset: number
+): Promise<EntityPage<MobileEvent>> {
+  const response = await requestResponse<MobileEvent[]>(
+    makeEndpoint({
+      resource: "mobile_events",
+      access_token: token,
+      workspaceId,
+      view,
       limit: String(limit),
       offset: String(offset)
     }),

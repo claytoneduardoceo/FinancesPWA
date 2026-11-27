@@ -23,6 +23,7 @@ import {
   type Workspace
 } from "./api/client";
 import Dashboard from "./Dashboard";
+import MobileEvents from "./MobileEvents";
 import RecordList, { type RecordListColumn } from "./RecordList";
 import {
   getQueryCacheError,
@@ -39,12 +40,14 @@ const WORKSPACE_NAVIGATION: Array<{
   icon: string;
 }> = [
   { id: "dashboard", label: "Dashboard", icon: "▦" },
+  { id: "mobile-review", label: "Pendências", icon: "!" },
   { id: "items", label: "Itens", icon: "↗" },
   { id: "income", label: "Rendas", icon: "↙" },
   { id: "expenses", label: "Despesas", icon: "↗" },
   { id: "debts", label: "Dívidas", icon: "◷" },
   { id: "subscriptions", label: "Assinaturas", icon: "◌" },
-  { id: "installments", label: "Parcelamentos", icon: "▤" }
+  { id: "installments", label: "Parcelamentos", icon: "▤" },
+  { id: "mobile-logs", label: "Histórico mobile", icon: "◷" }
 ];
 
 function readStoredSessionToken(): string | null {
@@ -100,12 +103,14 @@ interface TransactionPage extends EntityPage<Transaction> {
 
 type WorkspaceView =
   | "dashboard"
+  | "mobile-review"
   | "items"
   | "income"
   | "expenses"
   | "debts"
   | "subscriptions"
-  | "installments";
+  | "installments"
+  | "mobile-logs";
 
 type EntityPageWithOffset<T extends FinanceRecord> = EntityPage<T> & {
   nextOffset: number | null;
@@ -696,6 +701,20 @@ function TransactionsWorkspace({
             userId={userId}
             workspaceId={selectedWorkspace.id}
             workspaceName={selectedWorkspace.name || "Meu workspace"}
+          />
+        ) : activeView === "mobile-review" && selectedWorkspace ? (
+          <MobileEvents
+            token={token}
+            userId={userId}
+            workspaceId={selectedWorkspace.id}
+            view="review"
+          />
+        ) : activeView === "mobile-logs" && selectedWorkspace ? (
+          <MobileEvents
+            token={token}
+            userId={userId}
+            workspaceId={selectedWorkspace.id}
+            view="logs"
           />
         ) : isTransactionView ? (
         <section className="transactions-content" id="transactions">
